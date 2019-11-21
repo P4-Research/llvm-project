@@ -6154,7 +6154,7 @@ static ExprResult CopyObject(Sema &S,
                                      << (int)Entity.getKind()
                                      << CurInitExpr->getType()
                                      << CurInitExpr->getSourceRange()),
-        S, OCD_ViableCandidates, CurInitExpr);
+        S, OCD_AmbiguousCandidates, CurInitExpr);
     return ExprError();
 
   case OR_Deleted:
@@ -6295,7 +6295,7 @@ static void CheckCXX98CompatAccessibleCopy(Sema &S,
 
   case OR_Ambiguous:
     CandidateSet.NoteCandidates(PartialDiagnosticAt(Loc, Diag), S,
-                                OCD_ViableCandidates, CurInitExpr);
+                                OCD_AmbiguousCandidates, CurInitExpr);
     break;
 
   case OR_Deleted:
@@ -6946,8 +6946,8 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
 
   if (auto *MTE = dyn_cast<MaterializeTemporaryExpr>(Init)) {
     if (Visit(Path, Local(MTE), RK))
-      visitLocalsRetainedByInitializer(Path, MTE->GetTemporaryExpr(), Visit,
-                                       true, EnableLifetimeWarnings);
+      visitLocalsRetainedByInitializer(Path, MTE->getSubExpr(), Visit, true,
+                                       EnableLifetimeWarnings);
   }
 
   if (isa<CallExpr>(Init)) {
@@ -7067,9 +7067,8 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
             }
           } else if (auto *MTE = dyn_cast<MaterializeTemporaryExpr>(L)) {
             if (MTE->getType().isConstQualified())
-              visitLocalsRetainedByInitializer(Path, MTE->GetTemporaryExpr(),
-                                               Visit, true,
-                                               EnableLifetimeWarnings);
+              visitLocalsRetainedByInitializer(Path, MTE->getSubExpr(), Visit,
+                                               true, EnableLifetimeWarnings);
           }
           return false;
         }, EnableLifetimeWarnings);
@@ -8806,7 +8805,7 @@ bool InitializationSequence::Diagnose(Sema &S,
                   : (S.PDiag(diag::err_ref_init_ambiguous)
                      << DestType << OnlyArg->getType()
                      << Args[0]->getSourceRange())),
-          S, OCD_ViableCandidates, Args);
+          S, OCD_AmbiguousCandidates, Args);
       break;
 
     case OR_No_Viable_Function: {
@@ -9000,7 +8999,7 @@ bool InitializationSequence::Diagnose(Sema &S,
             PartialDiagnosticAt(Kind.getLocation(),
                                 S.PDiag(diag::err_ovl_ambiguous_init)
                                     << DestType << ArgsRange),
-            S, OCD_ViableCandidates, Args);
+            S, OCD_AmbiguousCandidates, Args);
         break;
 
       case OR_No_Viable_Function:
@@ -9863,7 +9862,7 @@ QualType Sema::DeduceTemplateSpecializationFromInitializer(
             Kind.getLocation(),
             PDiag(diag::err_deduced_class_template_ctor_ambiguous)
                 << TemplateName),
-        *this, OCD_ViableCandidates, Inits);
+        *this, OCD_AmbiguousCandidates, Inits);
     return QualType();
 
   case OR_No_Viable_Function: {

@@ -1835,9 +1835,11 @@ void ASTStmtWriter::VisitFunctionParmPackExpr(FunctionParmPackExpr *E) {
 
 void ASTStmtWriter::VisitMaterializeTemporaryExpr(MaterializeTemporaryExpr *E) {
   VisitExpr(E);
-  Record.AddStmt(E->getTemporary());
-  Record.AddDeclRef(E->getExtendingDecl());
-  Record.push_back(E->getManglingNumber());
+  Record.push_back(static_cast<bool>(E->getLifetimeExtendedTemporaryDecl()));
+  if (E->getLifetimeExtendedTemporaryDecl())
+    Record.AddDeclRef(E->getLifetimeExtendedTemporaryDecl());
+  else
+    Record.AddStmt(E->getSubExpr());
   Code = serialization::EXPR_MATERIALIZE_TEMPORARY;
 }
 
@@ -2265,6 +2267,12 @@ void ASTStmtWriter::VisitOMPParallelMasterTaskLoopDirective(
     OMPParallelMasterTaskLoopDirective *D) {
   VisitOMPLoopDirective(D);
   Code = serialization::STMT_OMP_PARALLEL_MASTER_TASKLOOP_DIRECTIVE;
+}
+
+void ASTStmtWriter::VisitOMPParallelMasterTaskLoopSimdDirective(
+    OMPParallelMasterTaskLoopSimdDirective *D) {
+  VisitOMPLoopDirective(D);
+  Code = serialization::STMT_OMP_PARALLEL_MASTER_TASKLOOP_SIMD_DIRECTIVE;
 }
 
 void ASTStmtWriter::VisitOMPDistributeDirective(OMPDistributeDirective *D) {

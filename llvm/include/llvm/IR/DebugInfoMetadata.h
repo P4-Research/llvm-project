@@ -1759,6 +1759,12 @@ public:
   bool isElemental() const { return getSPFlags() & SPFlagElemental; }
   bool isRecursive() const { return getSPFlags() & SPFlagRecursive; }
 
+  /// Check if this is deleted member function.
+  ///
+  /// Return true if this subprogram is a C++11 special
+  /// member function declared deleted.
+  bool isDeleted() const { return getSPFlags() & SPFlagDeleted; }
+
   /// Check if this is reference-qualified.
   ///
   /// Return true if this subprogram is a C++11 reference-qualified non-static
@@ -2545,6 +2551,11 @@ public:
       return 0;
   }
 
+  /// Append a zero- or sign-extension to \p Expr. Converts the expression to a
+  /// stack value if it isn't one already.
+  static DIExpression *appendExt(const DIExpression *Expr, unsigned FromSize,
+                                 unsigned ToSize, bool Signed);
+
   /// Check if fragments overlap between a pair of FragmentInfos.
   static bool fragmentsOverlap(const FragmentInfo &A, const FragmentInfo &B) {
     return fragmentCmp(A, B) == 0;
@@ -2808,11 +2819,6 @@ public:
 
   bool isArtificial() const { return getFlags() & FlagArtificial; }
   bool isObjectPointer() const { return getFlags() & FlagObjectPointer; }
-
-  /// Check that an argument is unmodified.
-  bool isNotModified() const { return getFlags() & FlagArgumentNotModified; }
-  /// Set the flag if an argument is unmodified.
-  void setIsNotModified() { Flags |= FlagArgumentNotModified; }
 
   /// Check that a location is valid for this variable.
   ///

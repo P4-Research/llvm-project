@@ -7009,6 +7009,8 @@ NamedDecl *Sema::ActOnVariableDeclarator(
           Diag(E->getExprLoc(), diag::err_asm_invalid_global_var_reg) << Label;
         else if (HasSizeMismatch)
           Diag(E->getExprLoc(), diag::err_asm_register_size_mismatch) << Label;
+        else if (!TI.isRegisterReservedGlobally(Label))
+          Diag(E->getExprLoc(), diag::err_asm_missing_fixed_reg_opt) << Label;
       }
 
       if (!R->isIntegralType(Context) && !R->isPointerType()) {
@@ -7017,8 +7019,9 @@ NamedDecl *Sema::ActOnVariableDeclarator(
       }
     }
 
-    NewVD->addAttr(::new (Context) AsmLabelAttr(
-        Context, SE->getStrTokenLoc(0), Label, /*IsLiteralLabel=*/true));
+    NewVD->addAttr(AsmLabelAttr::Create(Context, Label,
+                                        /*IsLiteralLabel=*/true,
+                                        SE->getStrTokenLoc(0)));
   } else if (!ExtnameUndeclaredIdentifiers.empty()) {
     llvm::DenseMap<IdentifierInfo*,AsmLabelAttr*>::iterator I =
       ExtnameUndeclaredIdentifiers.find(NewVD->getIdentifier());
@@ -8921,9 +8924,9 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
   if (Expr *E = (Expr*) D.getAsmLabel()) {
     // The parser guarantees this is a string.
     StringLiteral *SE = cast<StringLiteral>(E);
-    NewFD->addAttr(::new (Context)
-                       AsmLabelAttr(Context, SE->getStrTokenLoc(0),
-                                    SE->getString(), /*IsLiteralLabel=*/true));
+    NewFD->addAttr(AsmLabelAttr::Create(Context, SE->getString(),
+                                        /*IsLiteralLabel=*/true,
+                                        SE->getStrTokenLoc(0)));
   } else if (!ExtnameUndeclaredIdentifiers.empty()) {
     llvm::DenseMap<IdentifierInfo*,AsmLabelAttr*>::iterator I =
       ExtnameUndeclaredIdentifiers.find(NewFD->getIdentifier());
@@ -9528,6 +9531,29 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       NewFD->dropAttr<AvailabilityAttr>();
     }
   }
+
+  // Diagnose no_builtin attribute on function declaration that are not a
+  // definition.
+  // FIXME: We should really be doing this in
+  // SemaDeclAttr.cpp::handleNoBuiltinAttr, unfortunately we only have access to
+  // the FunctionDecl and at this point of the code
+  // FunctionDecl::isThisDeclarationADefinition() which always returns `false`
+  // because Sema::ActOnStartOfFunctionDef has not been called yet.
+  if (const auto *NBA = NewFD->getAttr<NoBuiltinAttr>())
+    switch (D.getFunctionDefinitionKind()) {
+    case FDK_Defaulted:
+    case FDK_Deleted:
+      Diag(NBA->getLocation(),
+           diag::err_attribute_no_builtin_on_defaulted_deleted_function)
+          << NBA->getSpelling();
+      break;
+    case FDK_Declaration:
+      Diag(NBA->getLocation(), diag::err_attribute_no_builtin_on_non_definition)
+          << NBA->getSpelling();
+      break;
+    case FDK_Definition:
+      break;
+    }
 
   return NewFD;
 }

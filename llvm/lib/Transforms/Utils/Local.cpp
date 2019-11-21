@@ -1611,6 +1611,11 @@ bool llvm::salvageDebugInfo(Instruction &I) {
   return salvageDebugInfoForDbgValues(I, DbgUsers);
 }
 
+void llvm::salvageDebugInfoOrMarkUndef(Instruction &I) {
+  if (!salvageDebugInfo(I))
+    replaceDbgUsesWithUndef(&I);
+}
+
 bool llvm::salvageDebugInfoForDbgValues(
     Instruction &I, ArrayRef<DbgVariableIntrinsic *> DbgUsers) {
   auto &Ctx = I.getContext();
@@ -1862,10 +1867,8 @@ bool llvm::replaceAllDbgUsesWith(Instruction &From, Value &To,
         return None;
 
       bool Signed = *Signedness == DIBasicType::Signedness::Signed;
-      dwarf::TypeKind TK = Signed ? dwarf::DW_ATE_signed : dwarf::DW_ATE_unsigned;
-      SmallVector<uint64_t, 8> Ops({dwarf::DW_OP_LLVM_convert, ToBits, TK,
-                                   dwarf::DW_OP_LLVM_convert, FromBits, TK});
-      return DIExpression::appendToStack(DII.getExpression(), Ops);
+      return DIExpression::appendExt(DII.getExpression(), ToBits, FromBits,
+                                     Signed);
     };
     return rewriteDebugUsers(From, To, DomPoint, DT, SignOrZeroExt);
   }

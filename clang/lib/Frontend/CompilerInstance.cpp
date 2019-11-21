@@ -1472,51 +1472,52 @@ static void pruneModuleCache(const HeaderSearchOptions &HSOpts) {
 }
 
 void CompilerInstance::createModuleManager() {
-  if (!ModuleManager) {
-    if (!hasASTContext())
-      createASTContext();
+  if (ModuleManager)
+    return;
 
-    // If we're implicitly building modules but not currently recursively
-    // building a module, check whether we need to prune the module cache.
-    if (getSourceManager().getModuleBuildStack().empty() &&
-        !getPreprocessor().getHeaderSearchInfo().getModuleCachePath().empty() &&
-        getHeaderSearchOpts().ModuleCachePruneInterval > 0 &&
-        getHeaderSearchOpts().ModuleCachePruneAfter > 0) {
-      pruneModuleCache(getHeaderSearchOpts());
-    }
+  if (!hasASTContext())
+    createASTContext();
 
-    HeaderSearchOptions &HSOpts = getHeaderSearchOpts();
-    std::string Sysroot = HSOpts.Sysroot;
-    const PreprocessorOptions &PPOpts = getPreprocessorOpts();
-    std::unique_ptr<llvm::Timer> ReadTimer;
-    if (FrontendTimerGroup)
-      ReadTimer = std::make_unique<llvm::Timer>("reading_modules",
-                                                 "Reading modules",
-                                                 *FrontendTimerGroup);
-    ModuleManager = new ASTReader(
-        getPreprocessor(), getModuleCache(), &getASTContext(),
-        getPCHContainerReader(), getFrontendOpts().ModuleFileExtensions,
-        Sysroot.empty() ? "" : Sysroot.c_str(), PPOpts.DisablePCHValidation,
-        /*AllowASTWithCompilerErrors=*/false,
-        /*AllowConfigurationMismatch=*/false,
-        HSOpts.ModulesValidateSystemHeaders,
-        HSOpts.ValidateASTInputFilesContent,
-        getFrontendOpts().UseGlobalModuleIndex, std::move(ReadTimer));
-    if (hasASTConsumer()) {
-      ModuleManager->setDeserializationListener(
-        getASTConsumer().GetASTDeserializationListener());
-      getASTContext().setASTMutationListener(
-        getASTConsumer().GetASTMutationListener());
-    }
-    getASTContext().setExternalSource(ModuleManager);
-    if (hasSema())
-      ModuleManager->InitializeSema(getSema());
-    if (hasASTConsumer())
-      ModuleManager->StartTranslationUnit(&getASTConsumer());
-
-    for (auto &Listener : DependencyCollectors)
-      Listener->attachToASTReader(*ModuleManager);
+  // If we're implicitly building modules but not currently recursively
+  // building a module, check whether we need to prune the module cache.
+  if (getSourceManager().getModuleBuildStack().empty() &&
+      !getPreprocessor().getHeaderSearchInfo().getModuleCachePath().empty() &&
+      getHeaderSearchOpts().ModuleCachePruneInterval > 0 &&
+      getHeaderSearchOpts().ModuleCachePruneAfter > 0) {
+    pruneModuleCache(getHeaderSearchOpts());
   }
+
+  HeaderSearchOptions &HSOpts = getHeaderSearchOpts();
+  std::string Sysroot = HSOpts.Sysroot;
+  const PreprocessorOptions &PPOpts = getPreprocessorOpts();
+  std::unique_ptr<llvm::Timer> ReadTimer;
+  if (FrontendTimerGroup)
+    ReadTimer = std::make_unique<llvm::Timer>("reading_modules",
+                                                "Reading modules",
+                                                *FrontendTimerGroup);
+  ModuleManager = new ASTReader(
+      getPreprocessor(), getModuleCache(), &getASTContext(),
+      getPCHContainerReader(), getFrontendOpts().ModuleFileExtensions,
+      Sysroot.empty() ? "" : Sysroot.c_str(), PPOpts.DisablePCHValidation,
+      /*AllowASTWithCompilerErrors=*/false,
+      /*AllowConfigurationMismatch=*/false,
+      HSOpts.ModulesValidateSystemHeaders,
+      HSOpts.ValidateASTInputFilesContent,
+      getFrontendOpts().UseGlobalModuleIndex, std::move(ReadTimer));
+  if (hasASTConsumer()) {
+    ModuleManager->setDeserializationListener(
+      getASTConsumer().GetASTDeserializationListener());
+    getASTContext().setASTMutationListener(
+      getASTConsumer().GetASTMutationListener());
+  }
+  getASTContext().setExternalSource(ModuleManager);
+  if (hasSema())
+    ModuleManager->InitializeSema(getSema());
+  if (hasASTConsumer())
+    ModuleManager->StartTranslationUnit(&getASTConsumer());
+
+  for (auto &Listener : DependencyCollectors)
+    Listener->attachToASTReader(*ModuleManager);
 }
 
 bool CompilerInstance::loadModuleFile(StringRef FileName) {
@@ -1541,12 +1542,9 @@ bool CompilerInstance::loadModuleFile(StringRef FileName) {
     }
 
     void registerAll() {
-      for (auto *II : LoadedModules) {
-        CI.KnownModules[II] = CI.getPreprocessor()
-                                  .getHeaderSearchInfo()
-                                  .getModuleMap()
-                                  .findModule(II->getName());
-      }
+      ModuleMap &MM = CI.getPreprocessor().getHeaderSearchInfo().getModuleMap();
+      for (auto *II : LoadedModules)
+        MM.cacheModuleLoad(*II, MM.findModule(II->getName()));
       LoadedModules.clear();
     }
 
@@ -1635,14 +1633,12 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
     return LastModuleImportResult;
   }
 
-  clang::Module *Module = nullptr;
-
   // If we don't already have information on this module, load the module now.
-  llvm::DenseMap<const IdentifierInfo *, clang::Module *>::iterator Known
-    = KnownModules.find(Path[0].first);
-  if (Known != KnownModules.end()) {
-    // Retrieve the cached top-level module.
-    Module = Known->second;
+  Module *Module = nullptr;
+  ModuleMap &MM = getPreprocessor().getHeaderSearchInfo().getModuleMap();
+  if (auto MaybeModule = MM.getCachedModuleLoad(*Path[0].first)) {
+    // Use the cached result, which may be nullptr.
+    Module = *MaybeModule;
   } else if (ModuleName == getLangOpts().CurrentModule) {
     // This is the module we're building.
     Module = PP->getHeaderSearchInfo().lookupModule(
@@ -1656,7 +1652,7 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
     //  ModuleBuildFailed = true;
     //  return ModuleLoadResult();
     //}
-    Known = KnownModules.insert(std::make_pair(Path[0].first, Module)).first;
+    MM.cacheModuleLoad(*Path[0].first, Module);
   } else {
     // Search for a module with the given name.
     Module = PP->getHeaderSearchInfo().lookupModule(ModuleName, true,
@@ -1750,7 +1746,7 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
           getDiagnostics().Report(ModuleNameLoc, diag::err_module_prebuilt)
               << ModuleName;
           ModuleBuildFailed = true;
-          KnownModules[Path[0].first] = nullptr;
+          MM.cacheModuleLoad(*Path[0].first, nullptr);
           return ModuleLoadResult();
         }
       }
@@ -1764,7 +1760,7 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
         // necessarily even have a module map. Since ReadAST already produces
         // diagnostics for these two cases, we simply error out here.
         ModuleBuildFailed = true;
-        KnownModules[Path[0].first] = nullptr;
+        MM.cacheModuleLoad(*Path[0].first, nullptr);
         return ModuleLoadResult();
       }
 
@@ -1809,7 +1805,7 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
                "undiagnosed error in compileAndLoadModule");
         if (getPreprocessorOpts().FailedModules)
           getPreprocessorOpts().FailedModules->addFailed(ModuleName);
-        KnownModules[Path[0].first] = nullptr;
+        MM.cacheModuleLoad(*Path[0].first, nullptr);
         ModuleBuildFailed = true;
         return ModuleLoadResult();
       }
@@ -1832,19 +1828,19 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
       ModuleLoader::HadFatalFailure = true;
       // FIXME: The ASTReader will already have complained, but can we shoehorn
       // that diagnostic information into a more useful form?
-      KnownModules[Path[0].first] = nullptr;
+      MM.cacheModuleLoad(*Path[0].first, nullptr);
       return ModuleLoadResult();
 
     case ASTReader::Failure:
       ModuleLoader::HadFatalFailure = true;
       // Already complained, but note now that we failed.
-      KnownModules[Path[0].first] = nullptr;
+      MM.cacheModuleLoad(*Path[0].first, nullptr);
       ModuleBuildFailed = true;
       return ModuleLoadResult();
     }
 
     // Cache the result of this top-level module lookup for later.
-    Known = KnownModules.insert(std::make_pair(Path[0].first, Module)).first;
+    MM.cacheModuleLoad(*Path[0].first, Module);
   }
 
   // If we never found the module, fail.

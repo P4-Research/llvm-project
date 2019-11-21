@@ -968,7 +968,7 @@ DWARFVerifier::verifyNameIndexBuckets(const DWARFDebugNames::NameIndex &NI,
 
     constexpr BucketInfo(uint32_t Bucket, uint32_t Index)
         : Bucket(Bucket), Index(Index) {}
-    bool operator<(const BucketInfo &RHS) const { return Index < RHS.Index; };
+    bool operator<(const BucketInfo &RHS) const { return Index < RHS.Index; }
   };
 
   uint32_t NumErrors = 0;
@@ -1302,7 +1302,7 @@ static bool isVariableIndexable(const DWARFDie &Die, DWARFContext &DCtx) {
     if (const DWARFDebugLoc *DebugLoc = DCtx.getDebugLoc()) {
       if (const DWARFDebugLoc::LocationList *LocList =
               DebugLoc->getLocationListAtOffset(*Offset)) {
-        if (any_of(LocList->Entries, [&](const DWARFDebugLoc::Entry &E) {
+        if (any_of(LocList->Entries, [&](const DWARFLocationEntry &E) {
               return ContainsInterestingOperators(E.Loc);
             }))
           return true;

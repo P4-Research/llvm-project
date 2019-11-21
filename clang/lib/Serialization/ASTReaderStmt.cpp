@@ -1900,10 +1900,11 @@ void ASTStmtReader::VisitFunctionParmPackExpr(FunctionParmPackExpr *E) {
 
 void ASTStmtReader::VisitMaterializeTemporaryExpr(MaterializeTemporaryExpr *E) {
   VisitExpr(E);
-  E->State = Record.readSubExpr();
-  auto *VD = ReadDeclAs<ValueDecl>();
-  unsigned ManglingNumber = Record.readInt();
-  E->setExtendingDecl(VD, ManglingNumber);
+  bool HasMaterialzedDecl = Record.readInt();
+  if (HasMaterialzedDecl)
+    E->State = cast<LifetimeExtendedTemporaryDecl>(Record.readDecl());
+  else
+    E->State = Record.readSubExpr();
 }
 
 void ASTStmtReader::VisitCXXFoldExpr(CXXFoldExpr *E) {
@@ -2313,6 +2314,11 @@ void ASTStmtReader::VisitOMPMasterTaskLoopSimdDirective(
 
 void ASTStmtReader::VisitOMPParallelMasterTaskLoopDirective(
     OMPParallelMasterTaskLoopDirective *D) {
+  VisitOMPLoopDirective(D);
+}
+
+void ASTStmtReader::VisitOMPParallelMasterTaskLoopSimdDirective(
+    OMPParallelMasterTaskLoopSimdDirective *D) {
   VisitOMPLoopDirective(D);
 }
 
@@ -3128,6 +3134,14 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       unsigned CollapsedNum = Record[ASTStmtReader::NumStmtFields + 1];
       S = OMPParallelMasterTaskLoopDirective::CreateEmpty(Context, NumClauses,
                                                           CollapsedNum, Empty);
+      break;
+    }
+
+    case STMT_OMP_PARALLEL_MASTER_TASKLOOP_SIMD_DIRECTIVE: {
+      unsigned NumClauses = Record[ASTStmtReader::NumStmtFields];
+      unsigned CollapsedNum = Record[ASTStmtReader::NumStmtFields + 1];
+      S = OMPParallelMasterTaskLoopSimdDirective::CreateEmpty(
+          Context, NumClauses, CollapsedNum, Empty);
       break;
     }
 
